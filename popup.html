@@ -1,0 +1,113 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>CS.MONEY ↔ MarketCSGO</title>
+<style>
+  body { width: 320px; font: 13px system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 10px; }
+  button { padding: 8px 10px; border: none; border-radius: 8px; background: #111827; color: #fff; cursor: pointer; }
+  #status { margin: 8px 0 12px; color: #111827; white-space: pre-wrap; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .pill { padding: 4px 8px; background:#eee; border-radius:8px; }
+  label { display:flex; gap:6px; align-items:center; }
+  select, input { padding:4px 6px; }
+</style>
+
+<b>CS.MONEY ↔ MarketCSGO</b>
+<p id="status">Готов.</p>
+
+<div class="row">
+  <button id="force">Обновить прайс</button>
+  <button id="stop">Стоп сейчас</button>
+  <button id="reloadUi" title="Перечитать настройки из хранилища">Обновить</button>
+</div>
+
+<hr>
+
+<div class="row">
+  <label><input type="checkbox" id="autoEnabled"> Авто-режим</label>
+  <select id="autoMode">
+    <option value="active">Активный</option>
+    <option value="passive">Пассивный</option>
+  </select>
+</div>
+<div class="row">
+  <span class="pill">Интервал (мс):</span>
+  <input id="autoIntervalMs" type="number" min="250" step="50" style="width:90px">
+  <span class="pill">N карточек:</span>
+  <input id="autoScanLimit" type="number" min="1" step="1" style="width:70px">
+  <span class="pill">ROI ≥ (%)</span>
+  <input id="autoRoiThresholdPct" type="number" step="0.1" style="width:70px">
+</div>
+<div class="row">
+  <span class="pill">Рандом мин (мс):</span>
+  <input id="autoRandomMinMs" type="number" min="0" step="10" style="width:80px">
+  <span class="pill">Рандом макс (мс):</span>
+  <input id="autoRandomMaxMs" type="number" min="0" step="10" style="width:80px">
+</div>
+<div class="row">
+  <button id="saveAuto">Применить</button>
+</div>
+
+<script>
+  const statusEl = document.getElementById('status');
+  const DEF = { autoEnabled:false, autoMode:'active', autoIntervalMs:1000, autoScanLimit:20, autoRoiThresholdPct:20, autoRandomMinMs:120, autoRandomMaxMs:420 };
+  const ids = ["autoEnabled","autoMode","autoIntervalMs","autoScanLimit","autoRoiThresholdPct","autoRandomMinMs","autoRandomMaxMs"];
+
+  function fillUi(s){
+    document.getElementById('autoEnabled').checked = !!s.autoEnabled;
+    document.getElementById('autoMode').value = s.autoMode || 'active';
+    document.getElementById('autoIntervalMs').value = s.autoIntervalMs ?? 1000;
+    document.getElementById('autoScanLimit').value = s.autoScanLimit ?? 20;
+    document.getElementById('autoRoiThresholdPct').value = s.autoRoiThresholdPct ?? 20;
+    document.getElementById('autoRandomMinMs').value = s.autoRandomMinMs ?? 120;
+    document.getElementById('autoRandomMaxMs').value = s.autoRandomMaxMs ?? 420;
+  }
+  function loadAuto(){ chrome.storage.sync.get(DEF, fillUi); }
+  function saveAuto(){
+    const data = {
+      autoEnabled: document.getElementById('autoEnabled').checked,
+      autoMode: document.getElementById('autoMode').value,
+      autoIntervalMs: Number(document.getElementById('autoIntervalMs').value) || 1000,
+      autoScanLimit: Number(document.getElementById('autoScanLimit').value) || 20,
+      autoRoiThresholdPct: Number(document.getElementById('autoRoiThresholdPct').value) || 20,
+      autoRandomMinMs: Number(document.getElementById('autoRandomMinMs').value) || 120,
+      autoRandomMaxMs: Number(document.getElementById('autoRandomMaxMs').value) || 420
+    };
+    chrome.storage.sync.set(data, () => { statusEl.textContent = 'Настройки применены'; });
+  }
+
+  document.getElementById('force').onclick = () => {
+    statusEl.textContent = 'Обновляю прайс…';
+    chrome.runtime.sendMessage({ type: 'REFRESH_PRICES' }, (resp) => {
+      if (resp?.ok) {
+        const t = new Date(resp.ts).toLocaleTimeString();
+        statusEl.textContent = `Обновлено: ${t}\nПозиций: ${resp.count}`;
+        chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+          if (tabs[0]) chrome.tabs.sendMessage(tabs[0].id, { type: 'RECOMPARE_ALL' });
+        });
+      } else {
+        statusEl.textContent = `Ошибка: ${resp?.error || 'нет ответа'}`;
+      }
+    });
+  };
+  document.getElementById('stop').onclick = () => {
+    chrome.storage.sync.set({ autoEnabled: false }, () => {
+      statusEl.textContent = 'Авто-режим выключен';
+      chrome.tabs.query({ url: '*://*.cs.money/*' }, tabs => {
+        for (const t of tabs) chrome.tabs.sendMessage(t.id, { type: 'RECOMPARE_ALL' });
+      });
+    });
+  };
+  document.getElementById('saveAuto').onclick = saveAuto;
+  document.getElementById('reloadUi').onclick = loadAuto;
+
+  // Живая синхронизация: если открыты и options.html, и popup — обновляемся по событию
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'sync') return;
+    if (Object.keys(changes).some(k => ids.includes(k))) {
+      chrome.storage.sync.get(DEF, fillUi);
+      statusEl.textContent = 'Настройки обновлены извне';
+    }
+  });
+
+  loadAuto();
+</script>

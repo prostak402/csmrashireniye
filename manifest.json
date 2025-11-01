@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "CS.MONEY ↔ MarketCSGO: Профит-помощник (авто-режим)",
+  "version": "0.9.1",
+  "description": "Сравнение CS.MONEY с Market CSGO (ROI). Автообновление, авто-добавление в корзину / уведомления, горячая клавиша стоп, рандомизация кликов.",
+  "permissions": [
+    "tabs",
+    "notifications",
+    "storage",
+    "alarms",
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://*.cs.money/*",
+    "https://market.csgo.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.cs.money/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "icons": {
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}

@@ -1,0 +1,122 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Настройки сравнения</title>
+<style>
+  body { font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Arial; margin:20px; max-width:880px; }
+  label { display:block; margin:10px 0; }
+  input[type="number"] { width:140px; }
+  select { width:360px; }
+  small { color:#555; }
+  #save { padding:8px 12px; border:none; border-radius:8px; background:#111827; color:#fff; cursor:pointer; }
+  fieldset { border:1px solid #ddd; border-radius:8px; padding:12px; margin:12px 0; }
+  legend { padding:0 6px; color:#111827; }
+  .row { display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  .inline { display:flex; gap:12px; align-items:center; }
+</style>
+<h1>Настройки</h1>
+
+<label>Комиссия покупки на CS.MONEY (доля)
+  <input id="buyFeeCsm" type="number" step="0.01" min="0" max="1">
+</label>
+<label>Комиссия продажи на Market CSGO (доля)
+  <input id="sellFeeMarket" type="number" step="0.01" min="0" max="1">
+</label>
+<label>Комиссия вывода с Market CSGO (доля)
+  <input id="withdrawFeeMarket" type="number" step="0.01" min="0" max="1">
+</label>
+<label>Порог ROI (доля, например 0.05 для 5%)
+  <input id="roiMin" type="number" step="0.01" min="-1" max="1">
+</label>
+<label>TTL прайса Market (минуты)
+  <input id="priceTtlMin" type="number" step="1" min="1">
+</label>
+
+<fieldset>
+  <legend>Источник цены</legend>
+  <label>Источник:
+    <select id="priceMode">
+      <option value="best_offer">Лучшая цена (prices)</option>
+      <option value="buy_order">Max buy order (orders)</option>
+      <option value="smart">Смарт-оценка (без истории)</option>
+    </select>
+  </label>
+  <div id="smartBox">
+    <label>Подрез лучшего предложения (доля)
+      <input id="undercutPct" type="number" step="0.001" min="0" max="0.1">
+    </label>
+    <label>Наценка к max buy order (доля)
+      <input id="bidMarkupPct" type="number" step="0.001" min="0" max="0.2">
+    </label>
+    <label>Порог «узкого» спреда (доля)
+      <input id="tightSpreadPct" type="number" step="0.001" min="0" max="0.2">
+    </label>
+  </div>
+</fieldset>
+
+<fieldset>
+  <legend>Цвет плашки по ROI</legend>
+  <b>Max Buy Order</b>
+  <div class="row">
+    <label>Жёлтая зона от (%)
+      <input id="roiYellowFromPct" type="number" step="0.1" min="-100" max="100">
+    </label>
+    <label>до (%)
+      <input id="roiYellowToPct" type="number" step="0.1" min="-100" max="100">
+    </label>
+  </div>
+  <b>Smart / Лучшая цена</b>
+  <div class="row">
+    <label>Зелёная зона ≥ (%)
+      <input id="roiGreenMinPct" type="number" step="0.1" min="-100" max="100">
+    </label>
+    <label>Фиолетовая зона ≥ (%)
+      <input id="roiPurpleMinPct" type="number" step="0.1" min="-100" max="100">
+    </label>
+    <label>Синяя зона ≥ (%)
+      <input id="roiBlueMinPct" type="number" step="0.1" min="-100" max="100">
+    </label>
+  </div>
+</fieldset>
+
+<fieldset>
+  <legend>Автоматический режим</legend>
+  <div class="row">
+    <label class="inline"><input id="autoEnabled" type="checkbox"> Включить авто-режим</label>
+    <label>Режим:
+      <select id="autoMode">
+        <option value="active">Активный — клики по кнопкам</option>
+        <option value="passive">Пассивный — только уведомления</option>
+      </select>
+    </label>
+  </div>
+  <div class="row">
+    <label>Интервал автообновления (мс)
+      <input id="autoIntervalMs" type="number" step="50" min="250">
+    </label>
+    <label>Сканировать первые N карточек
+      <input id="autoScanLimit" type="number" step="1" min="1">
+    </label>
+    <label>Порог ROI для автодействия (%)
+      <input id="autoRoiThresholdPct" type="number" step="0.1" min="-100" max="100">
+    </label>
+	<label style="display:block;margin-top:8px;">
+  ROI для автопокупки, %:
+  <input id="autoBuyRoiThresholdPct" type="number" min="0" max="10000" step="1" placeholder="500" />
+</label>
+
+  </div>
+  
+  <div class="row">
+    <label>Мин. задержка клика (мс)
+      <input id="autoRandomMinMs" type="number" step="10" min="0">
+    </label>
+    <label>Макс. задержка клика (мс)
+      <input id="autoRandomMaxMs" type="number" step="10" min="0">
+    </label>
+    <small>Задержка применяется к Refresh→ожидание, «Добавить в корзину», «Перейти в корзину».</small>
+  </div>
+</fieldset>
+
+<button id="save">Сохранить</button>
+
+<script src="options.js"></script>
