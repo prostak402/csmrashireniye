@@ -57,6 +57,19 @@ function normName(s){
 }
 
 let priceCache = { time: 0, currency: "RUB", mapByName: {} };
+const notificationActions = new Map();
+
+chrome.notifications?.onClicked?.addListener?.(notifId => {
+  const action = notificationActions.get(notifId);
+  if (typeof action === 'function') {
+    try {
+      action();
+    } catch (_) {
+      // ignore action errors
+    }
+  }
+  notificationActions.delete(notifId);
+});
 
 function buildBestOffers(items){
   const out = {};
@@ -238,21 +251,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type === 'AUTO_NOTIFY') {
     const { title, message } = msg.payload || {};
     const notifId = `csm-auto-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    notificationActions.set(notifId, () => {
+      chrome.tabs.query({ url: '*://*.cs.money/*' }, tabs => {
+        if (tabs && tabs.length) {
+          chrome.tabs.update(tabs[0].id, { active:true });
+          chrome.windows.update(tabs[0].windowId, { focused:true });
+        }
+      });
+    });
     chrome.notifications.create(notifId, {
       type:'basic', iconUrl:'icon48.png',
       title: title || 'Найдена выгодная карточка',
       message: message || 'ROI превысил порог', priority:2
     }, () => {});
-    chrome.notifications.onClicked.addListener(clickedId => {
-      if (clickedId === notifId) {
-        chrome.tabs.query({ url: '*://*.cs.money/*' }, tabs => {
-          if (tabs && tabs.length) {
-            chrome.tabs.update(tabs[0].id, { active:true });
-            chrome.windows.update(tabs[0].windowId, { focused:true });
-          }
-        });
-      }
-    });
     sendResponse?.({ ok:true });
   }
 });
