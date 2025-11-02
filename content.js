@@ -26,6 +26,8 @@
   let auto = { ...AUTO_DEFAULTS };
   let autoHalted = false;
   let autoBuyInProgress = false;
+  let autoBuyQueue = new Set();
+  let autoBuyFinalizeTimer = null;
 
   const AUTO = {
     started: false,
@@ -46,6 +48,9 @@
       for (const id of Array.from(this.timeouts)) clearTimeout(id);
       this.timeouts.clear();
       this.started = false;
+      autoBuyQueue.clear();
+      autoBuyFinalizeTimer = null;
+      autoBuyInProgress = false;
     },
     scheduleCycle(delayMs){
       const id = setTimeout(() => { this.timeouts.delete(id); safeRefreshAndRescan(); }, Math.max(0, delayMs||0));
@@ -63,6 +68,71 @@
     return Math.floor(a + Math.random()*(b - a));
   }
   function randDelay(){ return randBetween(auto.autoRandomMinMs, auto.autoRandomMaxMs); }
+
+  function autoBuyKey(card, item){
+    return (
+      item?.cardId ||
+      card?.getAttribute?.('data-card-item-id') ||
+      item?.hashName ||
+      `auto-${Date.now()}-${Math.random().toString(36).slice(2,8)}`
+    );
+  }
+
+  function scheduleAutoBuyFinalize(){
+    if (autoBuyFinalizeTimer) return;
+    autoBuyFinalizeTimer = AUTO.timeout(() => {
+      autoBuyFinalizeTimer = null;
+      runAutoBuyFlow();
+    }, 320 + randDelay());
+  }
+
+  function queueAutoBuy(card, item){
+    if (!auto.autoBuyEnabled) return;
+    const key = autoBuyKey(card, item);
+    if (key) autoBuyQueue.add(key);
+    scheduleAutoBuyFinalize();
+  }
+
+  function runAutoBuyFlow(){
+    if (!auto.autoBuyEnabled){
+      autoBuyQueue.clear();
+      return;
+    }
+    if (!autoBuyQueue.size) return;
+    if (autoBuyInProgress){
+      scheduleAutoBuyFinalize();
+      return;
+    }
+
+    autoBuyInProgress = true;
+    const pendingCount = autoBuyQueue.size;
+    autoBuyQueue.clear();
+
+    AUTO.timeout(() => {
+      openCartAndWaitBuyButton({ attempts: 30, delay: 150 }, (buyBtn) => {
+        if (buyBtn){
+          robustClick(buyBtn);
+          toast(pendingCount > 1 ? `Автопокупка: нажал «Купить» для ${pendingCount} товаров` : 'Автопокупка: нажал «Купить»');
+        } else {
+          const checkout = findCheckoutButton();
+          if (checkout){
+            robustClick(checkout);
+            toast(pendingCount > 1
+              ? `Автопокупка: перешёл к оформлению для ${pendingCount} товаров (кнопка «Купить» не найдена)`
+              : 'Автопокупка: перешёл к оформлению (кнопка «Купить» не найдена)'
+            );
+          } else {
+            toast('Автопокупка: не удалось найти «Купить»');
+          }
+        }
+
+        AUTO.timeout(() => {
+          autoBuyInProgress = false;
+          if (autoBuyQueue.size) scheduleAutoBuyFinalize();
+        }, 4000);
+      });
+    }, 250 + randDelay());
+  }
 
   function toast(msg){
     try {
@@ -410,27 +480,7 @@
 
     // 2а) Сверх-ROI — автопокупка: ОБЯЗАТЕЛЬНО открываем корзину, ждём «Купить» и жмём
     if (auto.autoBuyEnabled && roiPct >= auto.autoBuyRoiThresholdPct){
-      if (autoBuyInProgress) return;
-      autoBuyInProgress = true;
-
-      AUTO.timeout(() => {
-        openCartAndWaitBuyButton({ attempts: 30, delay: 150 }, (buyBtn) => {
-          if (buyBtn) {
-            robustClick(buyBtn);
-            toast('Автопокупка: нажал «Купить»');
-          } else {
-            // Фолбэк: хотя бы попытаться к оформлению
-            const checkout = findCheckoutButton();
-            if (checkout) {
-              robustClick(checkout);
-              toast('Автопокупка: перешёл к оформлению (кнопка «Купить» не найдена)');
-            } else {
-              toast('Автопокупка: не удалось найти «Купить»');
-            }
-          }
-          AUTO.timeout(() => { autoBuyInProgress = false; }, 4000);
-        });
-      }, 250 + randDelay());
+      queueAutoBuy(card, item);
 
     // 2б) Обычный ROI — откроем корзину и нажмём «оформление», как раньше
     } else {
