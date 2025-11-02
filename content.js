@@ -26,6 +26,8 @@
   let auto = { ...AUTO_DEFAULTS };
   let autoHalted = false;
   let autoBuyInProgress = false;
+  let autoBuyQueue = new Set();
+  let autoBuyFinalizeTimer = null;
 
   const AUTO = {
     started: false,
@@ -46,6 +48,9 @@
       for (const id of Array.from(this.timeouts)) clearTimeout(id);
       this.timeouts.clear();
       this.started = false;
+      autoBuyQueue.clear();
+      autoBuyFinalizeTimer = null;
+      autoBuyInProgress = false;
     },
     scheduleCycle(delayMs){
       const id = setTimeout(() => { this.timeouts.delete(id); safeRefreshAndRescan(); }, Math.max(0, delayMs||0));
@@ -54,6 +59,11 @@
     timeout(fn, ms){
       const id = setTimeout(() => { this.timeouts.delete(id); fn(); }, Math.max(0, ms||0));
       this.timeouts.add(id); return id;
+    },
+    clearTimeout(id){
+      if (!id) return;
+      clearTimeout(id);
+      this.timeouts.delete(id);
     }
   };
 
@@ -63,6 +73,74 @@
     return Math.floor(a + Math.random()*(b - a));
   }
   function randDelay(){ return randBetween(auto.autoRandomMinMs, auto.autoRandomMaxMs); }
+
+  function autoBuyKey(card, item){
+    return (
+      item?.cardId ||
+      card?.getAttribute?.('data-card-item-id') ||
+      item?.hashName ||
+      `auto-${Date.now()}-${Math.random().toString(36).slice(2,8)}`
+    );
+  }
+
+  function scheduleAutoBuyFinalize(){
+    if (autoBuyFinalizeTimer){
+      AUTO.clearTimeout(autoBuyFinalizeTimer);
+      autoBuyFinalizeTimer = null;
+    }
+    autoBuyFinalizeTimer = AUTO.timeout(() => {
+      autoBuyFinalizeTimer = null;
+      runAutoBuyFlow();
+    }, 360 + randDelay());
+  }
+
+  function queueAutoBuy(card, item){
+    if (!auto.autoBuyEnabled) return;
+    const key = autoBuyKey(card, item);
+    if (key) autoBuyQueue.add(key);
+    scheduleAutoBuyFinalize();
+  }
+
+  function runAutoBuyFlow(){
+    if (!auto.autoBuyEnabled){
+      autoBuyQueue.clear();
+      return;
+    }
+    if (!autoBuyQueue.size) return;
+    if (autoBuyInProgress){
+      scheduleAutoBuyFinalize();
+      return;
+    }
+
+    autoBuyInProgress = true;
+    const pendingCount = autoBuyQueue.size;
+    autoBuyQueue.clear();
+
+    AUTO.timeout(() => {
+      openCartAndWaitBuyButton({ attempts: 30, delay: 150 }, (buyBtn) => {
+        if (buyBtn){
+          robustClick(buyBtn);
+          toast(pendingCount > 1 ? `Автопокупка: нажал «Купить» для ${pendingCount} товаров` : 'Автопокупка: нажал «Купить»');
+        } else {
+          const checkout = findCheckoutButton();
+          if (checkout){
+            robustClick(checkout);
+            toast(pendingCount > 1
+              ? `Автопокупка: перешёл к оформлению для ${pendingCount} товаров (кнопка «Купить» не найдена)`
+              : 'Автопокупка: перешёл к оформлению (кнопка «Купить» не найдена)'
+            );
+          } else {
+            toast('Автопокупка: не удалось найти «Купить»');
+          }
+        }
+
+        AUTO.timeout(() => {
+          autoBuyInProgress = false;
+          if (autoBuyQueue.size) scheduleAutoBuyFinalize();
+        }, 4000);
+      });
+    }, 250 + randDelay());
+  }
 
   function toast(msg){
     try {
@@ -282,30 +360,41 @@
     chrome.runtime.sendMessage({ type:'BATCH_COMPARE', payload: batch }, (resp) => {
       if (!resp || !resp.ok || (resp.count !== undefined && Number(resp.count) === 0)){
         batch.forEach(it => {
-          const card = getCardById(item.cardId);
+          const card = getCardById(it.cardId);
           if (card) injectPill(card, null, { error:true });
         });
         return;
       }
+
+      const highValue = [];
+
       for (const item of batch){
         const info = resp.result[item.cardId] || null;
         const card = getCardById(item.cardId);
         if (card) injectPill(card, info);
 
-        if (auto.autoEnabled && !autoHalted && info){
+        if (auto.autoEnabled && info){
           const roiPct = (info.roi * 100);
-
           if (roiPct >= auto.autoRoiThresholdPct){
-            haltAutoAndFocus();
-
-            if (auto.autoMode === 'active'){
-              AUTO.timeout(() => tryAutoClickForCard(card, item, info), randDelay());
-            } else {
-              AUTO.timeout(() => tryNotifyForCard(item, info), randDelay());
-            }
+            highValue.push({ card, item, info });
           }
         }
       }
+
+      if (!highValue.length) return;
+
+      const mode = auto.autoMode;
+      const baseDelay = randDelay();
+      haltAutoAndFocus();
+
+      highValue.forEach(({ card, item, info }, idx) => {
+        const delay = baseDelay + idx * 120;
+        if (mode === 'active' && card){
+          AUTO.timeout(() => tryAutoClickForCard(card, item, info), delay);
+        } else {
+          AUTO.timeout(() => tryNotifyForCard(item, info), delay);
+        }
+      });
     });
   }
 
@@ -384,18 +473,21 @@
 
   // Открыть корзину (при необходимости) и дождаться «Купить»
   function openCartAndWaitBuyButton({ attempts = 30, delay = 150 } = {}, onDone){
-    let left = attempts;
-    (function step(){
+    let left = Math.max(1, attempts|0);
+    let finished = false;
+    const step = () => {
+      if (finished) return;
       const buy = findBuyButtonOnce();
-      if (buy) return onDone(buy);
+      if (buy){ finished = true; return onDone(buy); }
 
       const cartBtn = findCartButton();
       if (cartBtn) robustClick(cartBtn);
 
       left -= 1;
-      if (left <= 0) return onDone(null);
-      setTimeout(step, delay + randDelay());
-    })();
+      if (left <= 0){ finished = true; return onDone(null); }
+      AUTO.timeout(step, delay + randDelay());
+    };
+    step();
   }
 
   // ---------------- Реакция на выгодную карточку ----------------
@@ -410,27 +502,7 @@
 
     // 2а) Сверх-ROI — автопокупка: ОБЯЗАТЕЛЬНО открываем корзину, ждём «Купить» и жмём
     if (auto.autoBuyEnabled && roiPct >= auto.autoBuyRoiThresholdPct){
-      if (autoBuyInProgress) return;
-      autoBuyInProgress = true;
-
-      AUTO.timeout(() => {
-        openCartAndWaitBuyButton({ attempts: 30, delay: 150 }, (buyBtn) => {
-          if (buyBtn) {
-            robustClick(buyBtn);
-            toast('Автопокупка: нажал «Купить»');
-          } else {
-            // Фолбэк: хотя бы попытаться к оформлению
-            const checkout = findCheckoutButton();
-            if (checkout) {
-              robustClick(checkout);
-              toast('Автопокупка: перешёл к оформлению (кнопка «Купить» не найдена)');
-            } else {
-              toast('Автопокупка: не удалось найти «Купить»');
-            }
-          }
-          AUTO.timeout(() => { autoBuyInProgress = false; }, 4000);
-        });
-      }, 250 + randDelay());
+      queueAutoBuy(card, item);
 
     // 2б) Обычный ROI — откроем корзину и нажмём «оформление», как раньше
     } else {
