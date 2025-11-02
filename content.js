@@ -14,6 +14,7 @@
 
   const AUTO_DEFAULTS = {
     autoEnabled: false,
+    autoActionsEnabled: true,
     autoMode: 'active',
     autoIntervalMs: 1000,
     autoScanLimit: 20,
@@ -142,6 +143,7 @@
     const prevEnabled = lastKnownAutoEnabled;
     chrome.storage.sync.get(AUTO_DEFAULTS, s => {
       auto = { ...AUTO_DEFAULTS, ...s };
+      auto.autoActionsEnabled  = !!auto.autoActionsEnabled;
       auto.autoIntervalMs      = Math.max(250, Number(auto.autoIntervalMs)||1000);
       auto.autoScanLimit       = Math.max(1, Math.trunc(Number(auto.autoScanLimit)||20));
       auto.autoRoiThresholdPct = clampRoiThreshold(auto.autoRoiThresholdPct, AUTO_DEFAULTS.autoRoiThresholdPct);
@@ -163,7 +165,7 @@
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'sync') return;
     const watched = [
-      'autoEnabled','autoMode','autoIntervalMs','autoScanLimit',
+      'autoEnabled','autoActionsEnabled','autoMode','autoIntervalMs','autoScanLimit',
       'autoRoiThresholdPct','autoBuyEnabled','autoBuyRoiThresholdPct',
       'autoRandomMinMs','autoRandomMaxMs'
     ];
@@ -365,9 +367,10 @@
             const roiPct = (info.roi * 100);
 
             if (roiPct >= auto.autoRoiThresholdPct){
-              triggeredEntries.push({ card, item, info, roiPct });
+              const entry = { card, item, info, roiPct };
+              triggeredEntries.push(entry);
 
-              if (auto.autoBuyEnabled && roiPct >= auto.autoBuyRoiThresholdPct){
+              if (auto.autoActionsEnabled && auto.autoBuyEnabled && roiPct >= auto.autoBuyRoiThresholdPct){
                 autoBuyEntries.push({ card, item, info, roiPct });
               }
             }
@@ -375,19 +378,27 @@
         }
 
         if (triggeredEntries.length){
-          haltAutoAndFocus();
+          if (auto.autoActionsEnabled){
+            haltAutoAndFocus();
 
-          if (auto.autoMode === 'active'){
-            if (autoBuyEntries.length){
-              scheduleAutoBuy(autoBuyEntries);
-            }
+            if (auto.autoMode === 'active'){
+              if (autoBuyEntries.length){
+                scheduleAutoBuy(autoBuyEntries);
+              }
 
-            const autoBuyIds = new Set(autoBuyEntries.map(({ item }) => item.cardId));
-            let delay = randDelay();
-            for (const entry of triggeredEntries){
-              if (autoBuyIds.has(entry.item.cardId)) continue;
-              AUTO.timeout(() => tryAutoClickForCard(entry.card, entry.item, entry.info), delay);
-              delay += 120 + randDelay();
+              const autoBuyIds = new Set(autoBuyEntries.map(({ item }) => item.cardId));
+              let delay = randDelay();
+              for (const entry of triggeredEntries){
+                if (autoBuyIds.has(entry.item.cardId)) continue;
+                AUTO.timeout(() => tryAutoClickForCard(entry.card, entry.item, entry.info), delay);
+                delay += 120 + randDelay();
+              }
+            } else {
+              let delay = randDelay();
+              for (const entry of triggeredEntries){
+                AUTO.timeout(() => tryNotifyForCard(entry.item, entry.info), delay);
+                delay += 120 + randDelay();
+              }
             }
           } else {
             let delay = randDelay();

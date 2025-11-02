@@ -16,6 +16,7 @@ const DEFAULTS = {
   roiBlueMinPct: 12,
   apiKey: "",
   autoEnabled: false,
+  autoActionsEnabled: true,
   autoMode: 'active',
   autoIntervalMs: 1000,
   autoScanLimit: 20,
