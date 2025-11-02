@@ -24,6 +24,7 @@
 
 <div class="row">
   <label><input type="checkbox" id="autoEnabled"> Авто-режим</label>
+  <label><input type="checkbox" id="autoActionsEnabled"> Автодействия</label>
   <select id="autoMode">
     <option value="active">Активный</option>
     <option value="passive">Пассивный</option>
@@ -47,67 +48,4 @@
   <button id="saveAuto">Применить</button>
 </div>
 
-<script>
-  const statusEl = document.getElementById('status');
-  const DEF = { autoEnabled:false, autoMode:'active', autoIntervalMs:1000, autoScanLimit:20, autoRoiThresholdPct:20, autoRandomMinMs:120, autoRandomMaxMs:420 };
-  const ids = ["autoEnabled","autoMode","autoIntervalMs","autoScanLimit","autoRoiThresholdPct","autoRandomMinMs","autoRandomMaxMs"];
-
-  function fillUi(s){
-    document.getElementById('autoEnabled').checked = !!s.autoEnabled;
-    document.getElementById('autoMode').value = s.autoMode || 'active';
-    document.getElementById('autoIntervalMs').value = s.autoIntervalMs ?? 1000;
-    document.getElementById('autoScanLimit').value = s.autoScanLimit ?? 20;
-    document.getElementById('autoRoiThresholdPct').value = s.autoRoiThresholdPct ?? 20;
-    document.getElementById('autoRandomMinMs').value = s.autoRandomMinMs ?? 120;
-    document.getElementById('autoRandomMaxMs').value = s.autoRandomMaxMs ?? 420;
-  }
-  function loadAuto(){ chrome.storage.sync.get(DEF, fillUi); }
-  function saveAuto(){
-    const data = {
-      autoEnabled: document.getElementById('autoEnabled').checked,
-      autoMode: document.getElementById('autoMode').value,
-      autoIntervalMs: Number(document.getElementById('autoIntervalMs').value) || 1000,
-      autoScanLimit: Number(document.getElementById('autoScanLimit').value) || 20,
-      autoRoiThresholdPct: Number(document.getElementById('autoRoiThresholdPct').value) || 20,
-      autoRandomMinMs: Number(document.getElementById('autoRandomMinMs').value) || 120,
-      autoRandomMaxMs: Number(document.getElementById('autoRandomMaxMs').value) || 420
-    };
-    chrome.storage.sync.set(data, () => { statusEl.textContent = 'Настройки применены'; });
-  }
-
-  document.getElementById('force').onclick = () => {
-    statusEl.textContent = 'Обновляю прайс…';
-    chrome.runtime.sendMessage({ type: 'REFRESH_PRICES' }, (resp) => {
-      if (resp?.ok) {
-        const t = new Date(resp.ts).toLocaleTimeString();
-        statusEl.textContent = `Обновлено: ${t}\nПозиций: ${resp.count}`;
-        chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-          if (tabs[0]) chrome.tabs.sendMessage(tabs[0].id, { type: 'RECOMPARE_ALL' });
-        });
-      } else {
-        statusEl.textContent = `Ошибка: ${resp?.error || 'нет ответа'}`;
-      }
-    });
-  };
-  document.getElementById('stop').onclick = () => {
-    chrome.storage.sync.set({ autoEnabled: false }, () => {
-      statusEl.textContent = 'Авто-режим выключен';
-      chrome.tabs.query({ url: '*://*.cs.money/*' }, tabs => {
-        for (const t of tabs) chrome.tabs.sendMessage(t.id, { type: 'RECOMPARE_ALL' });
-      });
-    });
-  };
-  document.getElementById('saveAuto').onclick = saveAuto;
-  document.getElementById('reloadUi').onclick = loadAuto;
-
-  // Живая синхронизация: если открыты и options.html, и popup — обновляемся по событию
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'sync') return;
-    if (Object.keys(changes).some(k => ids.includes(k))) {
-      chrome.storage.sync.get(DEF, fillUi);
-      statusEl.textContent = 'Настройки обновлены извне';
-    }
-  });
-
-  loadAuto();
-</script>
+<script src="popup.js"></script>

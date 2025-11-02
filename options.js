@@ -34,6 +34,7 @@ const DEFAULTS = {
 
   // Авторежим
   autoEnabled: false,
+  autoActionsEnabled: true,
   autoMode: 'active',           // active | passive
   autoIntervalMs: 1000,
   autoScanLimit: 20,
@@ -74,6 +75,7 @@ function collectPayload() {
 
   // ——— АВТОРЕЖИМ ———
   if (exists('autoEnabled'))            p.autoEnabled = !!$('autoEnabled').checked;
+  if (exists('autoActionsEnabled'))     p.autoActionsEnabled = !!$('autoActionsEnabled').checked;
   if (exists('autoMode'))               p.autoMode = $('autoMode').value || DEFAULTS.autoMode;
   if (exists('autoIntervalMs'))         p.autoIntervalMs = Math.max(250, num('autoIntervalMs', DEFAULTS.autoIntervalMs));
   if (exists('autoScanLimit'))          p.autoScanLimit = Math.max(1, Math.trunc(num('autoScanLimit', DEFAULTS.autoScanLimit)));
@@ -138,6 +140,7 @@ function load() {
 
     // Авторежим
     setIf('autoEnabled', s.autoEnabled);
+    setIf('autoActionsEnabled', s.autoActionsEnabled);
     setIf('autoMode', s.autoMode);
     setIf('autoIntervalMs', s.autoIntervalMs);
     setIf('autoScanLimit', s.autoScanLimit);
@@ -177,7 +180,7 @@ function debouncedSave() {
 // Навесить события
 function bind() {
   // instant save
-  ['autoEnabled','autoMode','priceMode','autoBuyEnabled'].forEach(id => {
+  ['autoEnabled','autoActionsEnabled','autoMode','priceMode','autoBuyEnabled'].forEach(id => {
     if (!exists(id)) return;
     const n = $(id);
     const evt = (n.type === 'checkbox') ? 'change' : 'input';
