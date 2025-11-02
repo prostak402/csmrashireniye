@@ -190,10 +190,41 @@
     const btn = findRefreshButton();
     if (btn) robustClick(btn);
   }
+
+  let refreshCycleInProgress = false;
+  let refreshCycleQueued = false;
   function safeRefreshAndRescan(){
     if (autoHalted) return;
-    clickRefreshButton();
-    AUTO.timeout(() => scanAndCompare(true), 120 + randDelay());
+    if (refreshCycleInProgress){
+      refreshCycleQueued = true;
+      return;
+    }
+    refreshCycleInProgress = true;
+    const finishCycle = () => {
+      refreshCycleInProgress = false;
+      const shouldRepeat = refreshCycleQueued && !autoHalted;
+      refreshCycleQueued = false;
+      if (shouldRepeat) safeRefreshAndRescan();
+    };
+    scanAndCompare(true, {
+      onDone(){
+        if (autoHalted){
+          finishCycle();
+          return;
+        }
+        AUTO.timeout(() => {
+          if (autoHalted){
+            finishCycle();
+            return;
+          }
+          clickRefreshButton();
+          AUTO.timeout(() => {
+            if (!autoHalted) scanAndCompare(true);
+            finishCycle();
+          }, 120 + randDelay());
+        }, 60 + randDelay());
+      }
+    });
   }
 
   // ---------------- Парсинг карточек ----------------
@@ -277,67 +308,88 @@
     return batch;
   }
 
-  function sendBatch(batch){
-    if (!batch.length) return;
-    chrome.runtime.sendMessage({ type:'BATCH_COMPARE', payload: batch }, (resp) => {
-      if (!resp || !resp.ok || (resp.count !== undefined && Number(resp.count) === 0)){
-        batch.forEach(it => {
-          const card = getCardById(it.cardId);
-          if (card) injectPill(card, null, { error:true });
-        });
-        return;
-      }
-      const triggeredEntries = [];
-      const autoBuyEntries = [];
-      for (const item of batch){
-        const info = resp.result[item.cardId] || null;
-        const card = getCardById(item.cardId);
-        if (card) injectPill(card, info);
+  function sendBatch(batch, opts={}){
+    const { onDone } = opts;
+    let done = false;
+    const signalDone = (details={}) => {
+      if (done) return;
+      done = true;
+      try { onDone?.(details); } catch(_){}
+    };
+    if (!batch.length){
+      signalDone({ empty:true });
+      return;
+    }
+    try {
+      chrome.runtime.sendMessage({ type:'BATCH_COMPARE', payload: batch }, (resp) => {
+        const runtimeErr = chrome.runtime?.lastError;
+        if (runtimeErr || !resp || !resp.ok || (resp.count !== undefined && Number(resp.count) === 0)){
+          batch.forEach(it => {
+            const card = getCardById(it.cardId);
+            if (card) injectPill(card, null, { error:true });
+          });
+          signalDone({ error:true, resp: resp ?? null, runtimeError: runtimeErr ?? null });
+          return;
+        }
+        const triggeredEntries = [];
+        const autoBuyEntries = [];
+        for (const item of batch){
+          const info = resp.result[item.cardId] || null;
+          const card = getCardById(item.cardId);
+          if (card) injectPill(card, info);
 
-        if (auto.autoEnabled && !autoHalted && info){
-          const roiPct = (info.roi * 100);
+          if (auto.autoEnabled && !autoHalted && info){
+            const roiPct = (info.roi * 100);
 
-          if (roiPct >= auto.autoRoiThresholdPct){
-            triggeredEntries.push({ card, item, info, roiPct });
+            if (roiPct >= auto.autoRoiThresholdPct){
+              triggeredEntries.push({ card, item, info, roiPct });
 
-            if (auto.autoBuyEnabled && roiPct >= auto.autoBuyRoiThresholdPct){
-              autoBuyEntries.push({ card, item, info, roiPct });
+              if (auto.autoBuyEnabled && roiPct >= auto.autoBuyRoiThresholdPct){
+                autoBuyEntries.push({ card, item, info, roiPct });
+              }
             }
           }
         }
-      }
 
-      if (triggeredEntries.length){
-        haltAutoAndFocus();
+        if (triggeredEntries.length){
+          haltAutoAndFocus();
 
-        if (auto.autoMode === 'active'){
-          if (autoBuyEntries.length){
-            scheduleAutoBuy(autoBuyEntries);
-          }
+          if (auto.autoMode === 'active'){
+            if (autoBuyEntries.length){
+              scheduleAutoBuy(autoBuyEntries);
+            }
 
-          const autoBuyIds = new Set(autoBuyEntries.map(({ item }) => item.cardId));
-          let delay = randDelay();
-          for (const entry of triggeredEntries){
-            if (autoBuyIds.has(entry.item.cardId)) continue;
-            AUTO.timeout(() => tryAutoClickForCard(entry.card, entry.item, entry.info), delay);
-            delay += 120 + randDelay();
-          }
-        } else {
-          let delay = randDelay();
-          for (const entry of triggeredEntries){
-            AUTO.timeout(() => tryNotifyForCard(entry.item, entry.info), delay);
-            delay += 120 + randDelay();
+            const autoBuyIds = new Set(autoBuyEntries.map(({ item }) => item.cardId));
+            let delay = randDelay();
+            for (const entry of triggeredEntries){
+              if (autoBuyIds.has(entry.item.cardId)) continue;
+              AUTO.timeout(() => tryAutoClickForCard(entry.card, entry.item, entry.info), delay);
+              delay += 120 + randDelay();
+            }
+          } else {
+            let delay = randDelay();
+            for (const entry of triggeredEntries){
+              AUTO.timeout(() => tryNotifyForCard(entry.item, entry.info), delay);
+              delay += 120 + randDelay();
+            }
           }
         }
-      }
-    });
+        signalDone({
+          resp,
+          triggered: triggeredEntries.length,
+          autoBuyTriggered: autoBuyEntries.length
+        });
+      });
+    } catch(err){
+      signalDone({ error:true, exception: err });
+    }
   }
 
-  function scanAndCompare(force=false){
+  function scanAndCompare(force=false, opts={}){
     if (force) seen = new WeakSet();
     const limit = auto.autoEnabled ? auto.autoScanLimit : Infinity;
     const b = collectBatch(limit);
-    sendBatch(b);
+    sendBatch(b, opts);
   }
 
   // ---------------- Кнопки: «в корзину», «корзина», «оформление», «Купить» ----------------
