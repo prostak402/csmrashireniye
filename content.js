@@ -282,11 +282,13 @@
     chrome.runtime.sendMessage({ type:'BATCH_COMPARE', payload: batch }, (resp) => {
       if (!resp || !resp.ok || (resp.count !== undefined && Number(resp.count) === 0)){
         batch.forEach(it => {
-          const card = getCardById(item.cardId);
+          const card = getCardById(it.cardId);
           if (card) injectPill(card, null, { error:true });
         });
         return;
       }
+      const triggeredEntries = [];
+      const autoBuyEntries = [];
       for (const item of batch){
         const info = resp.result[item.cardId] || null;
         const card = getCardById(item.cardId);
@@ -296,13 +298,35 @@
           const roiPct = (info.roi * 100);
 
           if (roiPct >= auto.autoRoiThresholdPct){
-            haltAutoAndFocus();
+            triggeredEntries.push({ card, item, info, roiPct });
 
-            if (auto.autoMode === 'active'){
-              AUTO.timeout(() => tryAutoClickForCard(card, item, info), randDelay());
-            } else {
-              AUTO.timeout(() => tryNotifyForCard(item, info), randDelay());
+            if (auto.autoBuyEnabled && roiPct >= auto.autoBuyRoiThresholdPct){
+              autoBuyEntries.push({ card, item, info, roiPct });
             }
+          }
+        }
+      }
+
+      if (triggeredEntries.length){
+        haltAutoAndFocus();
+
+        if (auto.autoMode === 'active'){
+          if (autoBuyEntries.length){
+            scheduleAutoBuy(autoBuyEntries);
+          }
+
+          const autoBuyIds = new Set(autoBuyEntries.map(({ item }) => item.cardId));
+          let delay = randDelay();
+          for (const entry of triggeredEntries){
+            if (autoBuyIds.has(entry.item.cardId)) continue;
+            AUTO.timeout(() => tryAutoClickForCard(entry.card, entry.item, entry.info), delay);
+            delay += 120 + randDelay();
+          }
+        } else {
+          let delay = randDelay();
+          for (const entry of triggeredEntries){
+            AUTO.timeout(() => tryNotifyForCard(entry.item, entry.info), delay);
+            delay += 120 + randDelay();
           }
         }
       }
@@ -399,50 +423,63 @@
   }
 
   // ---------------- Реакция на выгодную карточку ----------------
-  function tryAutoClickForCard(card, item, info){
+  function tryAutoClickForCard(card, item, info, opts = {}){
     if (!card) return;
 
-    // 1) Добавить в корзину
     const addBtn = findAddToCartBtn(card);
     if (addBtn) robustClick(addBtn);
 
-    const roiPct = info ? (info.roi*100) : 0;
+    if (opts.skipCheckout) return;
 
-    // 2а) Сверх-ROI — автопокупка: ОБЯЗАТЕЛЬНО открываем корзину, ждём «Купить» и жмём
-    if (auto.autoBuyEnabled && roiPct >= auto.autoBuyRoiThresholdPct){
-      if (autoBuyInProgress) return;
-      autoBuyInProgress = true;
-
+    AUTO.timeout(() => {
+      const cartBtn = findCartButton();
+      if (cartBtn) robustClick(cartBtn);
       AUTO.timeout(() => {
-        openCartAndWaitBuyButton({ attempts: 30, delay: 150 }, (buyBtn) => {
-          if (buyBtn) {
-            robustClick(buyBtn);
-            toast('Автопокупка: нажал «Купить»');
-          } else {
-            // Фолбэк: хотя бы попытаться к оформлению
-            const checkout = findCheckoutButton();
-            if (checkout) {
-              robustClick(checkout);
-              toast('Автопокупка: перешёл к оформлению (кнопка «Купить» не найдена)');
-            } else {
-              toast('Автопокупка: не удалось найти «Купить»');
-            }
-          }
-          AUTO.timeout(() => { autoBuyInProgress = false; }, 4000);
-        });
-      }, 250 + randDelay());
-
-    // 2б) Обычный ROI — откроем корзину и нажмём «оформление», как раньше
-    } else {
-      AUTO.timeout(() => {
-        const cartBtn = findCartButton();
-        if (cartBtn) robustClick(cartBtn);
-        AUTO.timeout(() => {
-          const checkout = findCheckoutButton();
-          if (checkout) robustClick(checkout);
-        }, 150 + randDelay());
+        const checkout = findCheckoutButton();
+        if (checkout) robustClick(checkout);
       }, 150 + randDelay());
+    }, 150 + randDelay());
+  }
+
+  function scheduleAutoBuy(entries){
+    if (!entries.length) return;
+    if (autoBuyInProgress) return;
+
+    autoBuyInProgress = true;
+
+    let delay = 0;
+    const uniqueIds = new Set();
+    for (const entry of entries){
+      if (!entry?.item?.cardId || uniqueIds.has(entry.item.cardId)) continue;
+      uniqueIds.add(entry.item.cardId);
+      AUTO.timeout(() => {
+        tryAutoClickForCard(entry.card, entry.item, entry.info, { skipCheckout: true });
+      }, delay);
+      delay += 120 + randDelay();
     }
+
+    if (uniqueIds.size === 0){
+      autoBuyInProgress = false;
+      return;
+    }
+
+    AUTO.timeout(() => {
+      openCartAndWaitBuyButton({ attempts: 30, delay: 150 }, (buyBtn) => {
+        if (buyBtn) {
+          robustClick(buyBtn);
+          toast(`Автопокупка: нажал «Купить» (${uniqueIds.size} шт.)`);
+        } else {
+          const checkout = findCheckoutButton();
+          if (checkout) {
+            robustClick(checkout);
+            toast('Автопокупка: перешёл к оформлению (кнопка «Купить» не найдена)');
+          } else {
+            toast('Автопокупка: не удалось найти «Купить»');
+          }
+        }
+        AUTO.timeout(() => { autoBuyInProgress = false; }, 4000);
+      });
+    }, delay + 250 + randDelay());
   }
 
   function tryNotifyForCard(item, info){
