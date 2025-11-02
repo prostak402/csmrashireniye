@@ -9,6 +9,9 @@ const num = (id, fallback) => {
   const v = Number($(id).value);
   return Number.isFinite(v) ? v : fallback;
 };
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const ROI_THRESHOLD_MIN = -1000;
+const ROI_THRESHOLD_MAX = 1000;
 
 // Дефолты — синхронизированы с контент-скриптом
 const DEFAULTS = {
@@ -74,9 +77,15 @@ function collectPayload() {
   if (exists('autoMode'))               p.autoMode = $('autoMode').value || DEFAULTS.autoMode;
   if (exists('autoIntervalMs'))         p.autoIntervalMs = Math.max(250, num('autoIntervalMs', DEFAULTS.autoIntervalMs));
   if (exists('autoScanLimit'))          p.autoScanLimit = Math.max(1, Math.trunc(num('autoScanLimit', DEFAULTS.autoScanLimit)));
-  if (exists('autoRoiThresholdPct'))    p.autoRoiThresholdPct = Math.max(0, num('autoRoiThresholdPct', DEFAULTS.autoRoiThresholdPct));
+  if (exists('autoRoiThresholdPct')) {
+    const val = num('autoRoiThresholdPct', DEFAULTS.autoRoiThresholdPct);
+    p.autoRoiThresholdPct = clamp(val, ROI_THRESHOLD_MIN, ROI_THRESHOLD_MAX);
+  }
   if (exists('autoBuyEnabled'))         p.autoBuyEnabled = !!$('autoBuyEnabled').checked;
-  if (exists('autoBuyRoiThresholdPct')) p.autoBuyRoiThresholdPct = Math.max(0, num('autoBuyRoiThresholdPct', DEFAULTS.autoBuyRoiThresholdPct));
+  if (exists('autoBuyRoiThresholdPct')) {
+    const val = num('autoBuyRoiThresholdPct', DEFAULTS.autoBuyRoiThresholdPct);
+    p.autoBuyRoiThresholdPct = clamp(val, ROI_THRESHOLD_MIN, ROI_THRESHOLD_MAX);
+  }
   if (exists('autoRandomMinMs'))        p.autoRandomMinMs = Math.max(0, num('autoRandomMinMs', DEFAULTS.autoRandomMinMs));
   if (exists('autoRandomMaxMs'))        p.autoRandomMaxMs = Math.max(0, num('autoRandomMaxMs', DEFAULTS.autoRandomMaxMs));
 

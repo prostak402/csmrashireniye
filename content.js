@@ -9,6 +9,9 @@
   const NON_WEAR_PREFIXES = [...NON_SKIN_PREFIXES];
   const STAR_ITEM_REGEX = /\b(Knife|Bayonet|Karambit|Butterfly|Daggers|Falchion|Huntsman|Bowie|Ursus|Navaja|Stiletto|Talon|Skeleton|Classic|Survival|Nomad|Flip|Gut|Gloves)\b/i;
 
+  const ROI_THRESHOLD_MIN = -1000;
+  const ROI_THRESHOLD_MAX = 1000;
+
   const AUTO_DEFAULTS = {
     autoEnabled: false,
     autoMode: 'active',
@@ -57,6 +60,12 @@
       this.timeouts.add(id); return id;
     }
   };
+
+  function clampRoiThreshold(value, fallback){
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(ROI_THRESHOLD_MAX, Math.max(ROI_THRESHOLD_MIN, n));
+  }
 
   function randBetween(min, max){
     const a = Math.max(0, Number(min)||0);
@@ -135,8 +144,8 @@
       auto = { ...AUTO_DEFAULTS, ...s };
       auto.autoIntervalMs      = Math.max(250, Number(auto.autoIntervalMs)||1000);
       auto.autoScanLimit       = Math.max(1, Math.trunc(Number(auto.autoScanLimit)||20));
-      auto.autoRoiThresholdPct = Number(auto.autoRoiThresholdPct)||20;
-      auto.autoBuyRoiThresholdPct = Math.max(0, Number(auto.autoBuyRoiThresholdPct)||500);
+      auto.autoRoiThresholdPct = clampRoiThreshold(auto.autoRoiThresholdPct, AUTO_DEFAULTS.autoRoiThresholdPct);
+      auto.autoBuyRoiThresholdPct = clampRoiThreshold(auto.autoBuyRoiThresholdPct, AUTO_DEFAULTS.autoBuyRoiThresholdPct);
       auto.autoRandomMinMs     = Math.max(0, Number(auto.autoRandomMinMs)||120);
       auto.autoRandomMaxMs     = Math.max(0, Number(auto.autoRandomMaxMs)||420);
       if (auto.autoRandomMaxMs < auto.autoRandomMinMs){
