@@ -27,6 +27,11 @@
     autoRandomMaxMs: 420
   };
 
+  const normalizeMode = (value) => {
+    const v = String(value || '').toLowerCase();
+    return v === 'passive' ? 'passive' : 'active';
+  };
+
   let auto = { ...AUTO_DEFAULTS };
   let autoHalted = false;
   let autoBuyInProgress = false;
@@ -39,6 +44,8 @@
     start(){
       this.stop();
       if (!auto.autoEnabled || autoHalted) return;
+      refreshCycleInProgress = false;
+      refreshCycleQueued = false;
       this.started = true;
       this.scheduleCycle(0);
       this.intervalId = setInterval(() => {
@@ -50,6 +57,8 @@
       if (this.intervalId){ clearInterval(this.intervalId); this.intervalId = null; }
       for (const id of Array.from(this.timeouts)) clearTimeout(id);
       this.timeouts.clear();
+      refreshCycleInProgress = false;
+      refreshCycleQueued = false;
       this.started = false;
     },
     scheduleCycle(delayMs){
@@ -144,6 +153,7 @@
     chrome.storage.sync.get(AUTO_DEFAULTS, s => {
       auto = { ...AUTO_DEFAULTS, ...s };
       auto.autoActionsEnabled  = !!auto.autoActionsEnabled;
+      auto.autoMode            = normalizeMode(auto.autoMode);
       auto.autoIntervalMs      = Math.max(250, Number(auto.autoIntervalMs)||1000);
       auto.autoScanLimit       = Math.max(1, Math.trunc(Number(auto.autoScanLimit)||20));
       auto.autoRoiThresholdPct = clampRoiThreshold(auto.autoRoiThresholdPct, AUTO_DEFAULTS.autoRoiThresholdPct);
@@ -171,12 +181,15 @@
     ];
     if (watched.some(k => k in changes)){
       loadAutoSettings((prevEnabled, nextEnabled) => {
-        if (nextEnabled && !prevEnabled) {
-          ensureAutoRunning({ immediateScan: true });
-        } else if (nextEnabled && !autoHalted) {
-          AUTO.start();
+        if (nextEnabled) {
+          if (!prevEnabled || autoHalted) {
+            const immediate = !prevEnabled || autoHalted;
+            ensureAutoRunning({ immediateScan: immediate });
+          } else {
+            AUTO.start();
+          }
         } else {
-          if (!nextEnabled) autoHalted = false;
+          autoHalted = false;
           AUTO.stop();
         }
       });
@@ -378,29 +391,27 @@
         }
 
         if (triggeredEntries.length){
-          if (auto.autoActionsEnabled){
+          const mode = normalizeMode(auto.autoMode);
+          const actionsAllowed = auto.autoActionsEnabled && mode === 'active';
+          const notificationsAllowed = auto.autoActionsEnabled && mode === 'passive';
+
+          if (actionsAllowed){
             haltAutoAndFocus();
 
-            if (auto.autoMode === 'active'){
-              if (autoBuyEntries.length){
-                scheduleAutoBuy(autoBuyEntries);
-              }
-
-              const autoBuyIds = new Set(autoBuyEntries.map(({ item }) => item.cardId));
-              let delay = randDelay();
-              for (const entry of triggeredEntries){
-                if (autoBuyIds.has(entry.item.cardId)) continue;
-                AUTO.timeout(() => tryAutoClickForCard(entry.card, entry.item, entry.info), delay);
-                delay += 120 + randDelay();
-              }
-            } else {
-              let delay = randDelay();
-              for (const entry of triggeredEntries){
-                AUTO.timeout(() => tryNotifyForCard(entry.item, entry.info), delay);
-                delay += 120 + randDelay();
-              }
+            if (autoBuyEntries.length){
+              scheduleAutoBuy(autoBuyEntries);
             }
-          } else {
+
+            const autoBuyIds = new Set(autoBuyEntries.map(({ item }) => item.cardId));
+            let delay = randDelay();
+            for (const entry of triggeredEntries){
+              if (autoBuyIds.has(entry.item.cardId)) continue;
+              AUTO.timeout(() => tryAutoClickForCard(entry.card, entry.item, entry.info), delay);
+              delay += 120 + randDelay();
+            }
+          } else if (notificationsAllowed){
+            haltAutoAndFocus();
+
             let delay = randDelay();
             for (const entry of triggeredEntries){
               AUTO.timeout(() => tryNotifyForCard(entry.item, entry.info), delay);
