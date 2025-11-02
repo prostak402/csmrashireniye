@@ -26,6 +26,7 @@
   let auto = { ...AUTO_DEFAULTS };
   let autoHalted = false;
   let autoBuyInProgress = false;
+  let lastKnownAutoEnabled = auto.autoEnabled;
 
   const AUTO = {
     started: false,
@@ -129,6 +130,7 @@
 
   // ---------------- Настройки ----------------
   function loadAutoSettings(cb){
+    const prevEnabled = lastKnownAutoEnabled;
     chrome.storage.sync.get(AUTO_DEFAULTS, s => {
       auto = { ...AUTO_DEFAULTS, ...s };
       auto.autoIntervalMs      = Math.max(250, Number(auto.autoIntervalMs)||1000);
@@ -140,8 +142,14 @@
       if (auto.autoRandomMaxMs < auto.autoRandomMinMs){
         const t = auto.autoRandomMinMs; auto.autoRandomMinMs = auto.autoRandomMaxMs; auto.autoRandomMaxMs = t;
       }
-      cb && cb();
+      lastKnownAutoEnabled = !!auto.autoEnabled;
+      cb && cb(prevEnabled, lastKnownAutoEnabled);
     });
+  }
+  function ensureAutoRunning({ immediateScan = false } = {}){
+    autoHalted = false;
+    AUTO.start();
+    if (immediateScan) scanAndCompare(true);
   }
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'sync') return;
@@ -151,9 +159,15 @@
       'autoRandomMinMs','autoRandomMaxMs'
     ];
     if (watched.some(k => k in changes)){
-      loadAutoSettings(() => {
-        if (auto.autoEnabled && !autoHalted) AUTO.start();
-        else AUTO.stop();
+      loadAutoSettings((prevEnabled, nextEnabled) => {
+        if (nextEnabled && !prevEnabled) {
+          ensureAutoRunning({ immediateScan: true });
+        } else if (nextEnabled && !autoHalted) {
+          AUTO.start();
+        } else {
+          if (!nextEnabled) autoHalted = false;
+          AUTO.stop();
+        }
       });
     }
   });
@@ -553,14 +567,14 @@
       autoHalted = false;
       chrome.storage.sync.set({ autoEnabled:false }, () => {
         auto.autoEnabled = false;
+        lastKnownAutoEnabled = false;
         toast('Автоматический режим: выключен');
       });
     } else {
-      autoHalted = false;
       chrome.storage.sync.set({ autoEnabled:true }, () => {
         auto.autoEnabled = true;
-        AUTO.start();
-        scanAndCompare(true);
+        lastKnownAutoEnabled = true;
+        ensureAutoRunning({ immediateScan: true });
         toast('Автоматический режим: включен');
       });
     }
@@ -587,7 +601,9 @@
     if (msg?.type==='RECOMPARE_ALL') scanAndCompare(true);
   });
 
-  loadAutoSettings(() => { if (auto.autoEnabled && !autoHalted) AUTO.start(); });
+  loadAutoSettings((prevEnabled, nextEnabled) => {
+    if (nextEnabled && !autoHalted) AUTO.start();
+  });
   scanAndCompare();
 
   // Вспомогательные форматтеры (внизу, чтобы не мешать чтению)
