@@ -58,6 +58,12 @@ function normName(s){
 }
 
 let priceCache = { time: 0, currency: "RUB", mapByName: {} };
+let historyIndexCache = { time: 0, mapByName: {} };
+const historyCache = new Map();
+const HISTORY_INDEX_TTL_MS = 12 * 60 * 60 * 1000;
+const HISTORY_ITEM_TTL_MS = 30 * 60 * 1000;
+const HISTORY_WINDOW_SEC = 7 * 24 * 60 * 60;
+const HISTORY_SAMPLE_LIMIT = 10;
 const notificationActions = new Map();
 
 chrome.notifications?.onClicked?.addListener?.(notifId => {
@@ -156,6 +162,84 @@ async function loadMarketPrices(force=false){
   return priceCache;
 }
 
+function calcMedian(arr){
+  if (!arr.length) return 0;
+  const sorted = [...arr].sort((a,b)=>a-b);
+  const mid = Math.floor(sorted.length/2);
+  if (sorted.length % 2 === 0) return (sorted[mid-1] + sorted[mid]) / 2;
+  return sorted[mid];
+}
+
+async function loadHistoryIndex(force=false){
+  const fresh = (Date.now() - historyIndexCache.time) < HISTORY_INDEX_TTL_MS;
+  if (!force && fresh && Object.keys(historyIndexCache.mapByName).length) return historyIndexCache.mapByName;
+  try {
+    const r = await fetch('https://market.csgo.com/api/v2/full-history/all.json');
+    if (!r.ok) return historyIndexCache.mapByName;
+    const data = await r.json();
+    const map = {};
+    for (const [name, id] of Object.entries(data?.history || {})){
+      const nm = normName(name);
+      if (!nm || !Number.isFinite(Number(id))) continue;
+      map[nm] = Number(id);
+    }
+    historyIndexCache = { time: Date.now(), mapByName: map };
+  } catch (_){}
+  return historyIndexCache.mapByName;
+}
+
+async function loadItemHistory(id){
+  const cached = historyCache.get(id);
+  if (cached && (Date.now() - cached.time) < HISTORY_ITEM_TTL_MS) return cached.data;
+  try {
+    const r = await fetch(`https://market.csgo.com/api/v2/full-history/${id}.json`);
+    if (!r.ok) return null;
+    const json = await r.json();
+    const hist = json?.data?.history;
+    if (Array.isArray(hist)){
+      historyCache.set(id, { time: Date.now(), data: hist });
+      return hist;
+    }
+  } catch(_){}
+  return null;
+}
+
+function pickRecentSales(history){
+  if (!Array.isArray(history)) return [];
+  const cutoff = Math.floor(Date.now()/1000) - HISTORY_WINDOW_SEC;
+  const out = [];
+  for (const entry of history){
+    const ts = Number(entry?.[0] || 0);
+    const priceRub = Number(entry?.[1] || 0);
+    if (!(priceRub > 0) || !(ts > 0)) continue;
+    if (ts < cutoff) break;
+    out.push(priceRub);
+    if (out.length >= HISTORY_SAMPLE_LIMIT) break;
+  }
+  return out;
+}
+
+function buildSmartPriceFromHistory(prices, s){
+  if (!prices.length) return null;
+  const median = calcMedian(prices);
+  const avg = prices.reduce((a,b)=>a+b,0) / prices.length;
+  const blended = (median*0.6 + avg*0.4);
+  const sale = blended * (1 - s.undercutPct);
+  return sale > 0 ? sale : null;
+}
+
+async function estimateSmartPrice(itemName, entry, s){
+  const index = await loadHistoryIndex();
+  const id = index[normName(itemName)] ?? null;
+  if (id){
+    const hist = await loadItemHistory(id);
+    const prices = pickRecentSales(hist);
+    const estimated = buildSmartPriceFromHistory(prices, s);
+    if (estimated) return { value: estimated, source: 'smart_history' };
+  }
+  return estimateSalePrice(entry, { ...s, priceMode: 'best_offer' });
+}
+
 function colorByRoi(roi, mode, s){
   const RED='#ef4444', YELLOW='#f59e0b', GREEN='#22c55e', PURPLE='#a855f7', BLUE='#3b82f6';
   mode = (mode||'').toLowerCase();
@@ -169,10 +253,10 @@ function colorByRoi(roi, mode, s){
   if (roi >= s._greenMin) return GREEN;
   return GREEN;
 }
-function estimateSalePrice(entry, s){
+function estimateSalePrice(entry, s, overrideMode){
   const best = Number(entry?.best_offer||0);
   const bid  = Number(entry?.buy_order||0);
-  const mode = (s.priceMode||'best_offer').toLowerCase();
+  const mode = (overrideMode || s.priceMode || 'best_offer').toLowerCase();
   if (mode === 'best_offer') return { value: best, source: 'best_offer' };
   if (mode === 'buy_order')  return { value: bid,  source: 'buy_order'  };
   const under = 1 - s.undercutPct;
@@ -184,7 +268,7 @@ function estimateSalePrice(entry, s){
     est = (spread <= tight) ? best*under : Math.min(best*under, Math.max(bid*up, bid));
   } else if (best>0) est = best*under;
   else if (bid>0) est = bid*up;
-  return { value: est, source: 'smart' };
+  return { value: est, source: 'smart_fallback' };
 }
 function calcWithBase(csmPriceRub, marketBase, s){
   if (!(marketBase>0)) return null;
@@ -199,10 +283,13 @@ async function handleBatchCompare(items){
   const s = await getSettings();
   const cache = await loadMarketPrices(false);
   const out = {};
+  const mode = (s.priceMode||'best_offer').toLowerCase();
   for (const item of items){
     const name = normName(item.hashName);
     const entry = cache.mapByName[name];
-    const est = estimateSalePrice(entry, s);
+    const est = (mode === 'smart')
+      ? await estimateSmartPrice(name, entry, s)
+      : estimateSalePrice(entry, s, mode);
     const res = calcWithBase(item.csmPriceRub, Number(est.value), s);
     out[item.cardId] = res ? {
       ok: res.roi >= s.roiMin,
