@@ -253,6 +253,27 @@
   }
 
   // ---------------- Парсинг карточек ----------------
+  function getWearBadgeInfo(card){
+    const badgeSelectors = [
+      '.csm_c5a774b6',
+      '.csm_592712e5',
+      '.csm_f9fa1fda',
+      '.csm_8b72a65e',
+      '.csm_6f5f3612'
+    ];
+    const badge = card.querySelector(badgeSelectors.join(', '));
+    const badgeText = badge?.textContent || '';
+    const wearSpan = !badge
+      ? Array.from(card.querySelectorAll('span')).find(el => /\b(FN|MW|FT|WW|BS)\b/.test(el.textContent || ''))
+      : null;
+    const rawText = (badgeText || wearSpan?.textContent || '').replace(/\s+/g,' ').trim();
+    const wearMatch = rawText.match(/\b(FN|MW|FT|WW|BS)\b/);
+    return {
+      wearAbbr: wearMatch ? wearMatch[1] : null,
+      isStatTrak: /(^|[^\w])ST([^\w]|$)/.test(rawText)
+    };
+  }
+
   function buildHashName(card){
     const img = card.querySelector('.csm_22b8286f img[alt]') || card.querySelector('img[alt]');
     let baseName = img?.getAttribute('alt')?.trim();
@@ -260,13 +281,9 @@
     baseName = stripStickerKeychainTails(baseName);
 
     const isNonWear = NON_WEAR_PREFIXES.some(p => baseName.startsWith(p));
-    const badge = card.querySelector('.csm_c5a774b6, .csm_592712e5, .csm_f9fa1fda');
-    let wearAbbr = null, isStatTrak = false;
-    if (badge){
-      const t = badge.textContent.replace(/\s+/g,' ').trim();
-      if (/(^|[^\w])ST([^\w]|$)/.test(t)) isStatTrak = true;
-      const m = t.match(/\b(FN|MW|FT|WW|BS)\b/); if (m) wearAbbr = m[1];
-    }
+    const badgeInfo = getWearBadgeInfo(card);
+    const wearAbbr = badgeInfo.wearAbbr;
+    const isStatTrak = badgeInfo.isStatTrak;
     if (!isNonWear && wearAbbr){
       const wearFull = WEAR_MAP[wearAbbr] || wearAbbr;
       if (!/\((Factory New|Minimal Wear|Field-Tested|Well-Worn|Battle-Scarred)\)/.test(baseName)){
