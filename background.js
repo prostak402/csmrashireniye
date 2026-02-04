@@ -21,6 +21,8 @@ const DEFAULTS = {
   autoIntervalMs: 1000,
   autoScanLimit: 20,
   autoRoiThresholdPct: 20,
+  autoBuyEnabled: true,
+  autoBuyRoiThresholdPct: 500,
   autoRandomMinMs: 120,
   autoRandomMaxMs: 420
 };
@@ -65,6 +67,60 @@ const HISTORY_ITEM_TTL_MS = 30 * 60 * 1000;
 const HISTORY_WINDOW_SEC = 7 * 24 * 60 * 60;
 const HISTORY_SAMPLE_LIMIT = 10;
 const notificationActions = new Map();
+const FETCH_DEFAULTS = { retries: 2, timeoutMs: 8000, backoffBaseMs: 500 };
+let lastErrorNotifiedAt = 0;
+
+function sleep(ms){
+  return new Promise(res => setTimeout(res, ms));
+}
+
+function setLastFetchError(error){
+  chrome.storage.local.set({ lastFetchError: error });
+}
+
+function clearLastFetchError(){
+  chrome.storage.local.set({ lastFetchError: null });
+}
+
+function notifyFetchError(error){
+  const now = Date.now();
+  if (now - lastErrorNotifiedAt < 10 * 60 * 1000) return;
+  lastErrorNotifiedAt = now;
+  chrome.notifications?.create?.(`csm-fetch-error-${now}`, {
+    type: 'basic',
+    iconUrl: 'icon48.png',
+    title: 'Ошибка загрузки данных',
+    message: error?.message || 'Не удалось обновить цены',
+    priority: 1
+  }, () => {});
+}
+
+async function fetchJsonWithRetry(url, opts = {}, retryOpts = {}){
+  const { retries, timeoutMs, backoffBaseMs } = { ...FETCH_DEFAULTS, ...retryOpts };
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt += 1){
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, { ...opts, signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      clearTimeout(timeoutId);
+      lastErr = err;
+      if (attempt < retries) {
+        await sleep(backoffBaseMs * (2 ** attempt));
+      }
+    }
+  }
+  const message = lastErr?.message || String(lastErr);
+  const payload = { message, url, ts: Date.now() };
+  setLastFetchError(payload);
+  notifyFetchError(payload);
+  throw lastErr;
+}
 
 chrome.notifications?.onClicked?.addListener?.(notifId => {
   const action = notificationActions.get(notifId);
@@ -143,22 +199,32 @@ async function loadMarketPrices(force=false){
 
   let mapBest = {}, mapOrders = {};
   try {
-    const r = await fetch('https://market.csgo.com/api/v2/prices/RUB.json');
-    if (r.ok) mapBest = buildBestOffers((await r.json())?.items ?? {});
+    const data = await fetchJsonWithRetry('https://market.csgo.com/api/v2/prices/RUB.json');
+    mapBest = buildBestOffers(data?.items ?? {});
   } catch(_){}
   try {
-    const r2 = await fetch('https://market.csgo.com/api/v2/prices/orders/RUB.json');
-    if (r2.ok) mapOrders = buildBuyOrders((await r2.json())?.items ?? {});
+    const data2 = await fetchJsonWithRetry('https://market.csgo.com/api/v2/prices/orders/RUB.json');
+    mapOrders = buildBuyOrders(data2?.items ?? {});
   } catch(_){}
 
   const result = {};
   const names = new Set([...Object.keys(mapBest), ...Object.keys(mapOrders)]);
+  if (names.size === 0 && Object.keys(priceCache.mapByName || {}).length) {
+    return priceCache;
+  }
   for (const name of names){
     const a = mapBest[name] || {}, b = mapOrders[name] || {};
     const best = Number(a.best_offer||0), bid = Number(b.buy_order||0);
     result[name] = { best_offer: best>0?best:0, buy_order: bid>0?bid:0 };
   }
   priceCache = { time: Date.now(), currency:'RUB', mapByName: result };
+  if (names.size > 0) {
+    clearLastFetchError();
+  }
+  chrome.storage.local.set({
+    lastPriceFetchTs: priceCache.time,
+    lastPriceItemCount: Object.keys(priceCache.mapByName || {}).length
+  });
   return priceCache;
 }
 
@@ -174,9 +240,7 @@ async function loadHistoryIndex(force=false){
   const fresh = (Date.now() - historyIndexCache.time) < HISTORY_INDEX_TTL_MS;
   if (!force && fresh && Object.keys(historyIndexCache.mapByName).length) return historyIndexCache.mapByName;
   try {
-    const r = await fetch('https://market.csgo.com/api/v2/full-history/all.json');
-    if (!r.ok) return historyIndexCache.mapByName;
-    const data = await r.json();
+    const data = await fetchJsonWithRetry('https://market.csgo.com/api/v2/full-history/all.json', {}, { timeoutMs: 12000 });
     const map = {};
     for (const [name, id] of Object.entries(data?.history || {})){
       const nm = normName(name);
@@ -192,9 +256,7 @@ async function loadItemHistory(id){
   const cached = historyCache.get(id);
   if (cached && (Date.now() - cached.time) < HISTORY_ITEM_TTL_MS) return cached.data;
   try {
-    const r = await fetch(`https://market.csgo.com/api/v2/full-history/${id}.json`);
-    if (!r.ok) return null;
-    const json = await r.json();
+    const json = await fetchJsonWithRetry(`https://market.csgo.com/api/v2/full-history/${id}.json`, {}, { timeoutMs: 12000 });
     const hist = json?.data?.history;
     if (Array.isArray(hist)){
       historyCache.set(id, { time: Date.now(), data: hist });
