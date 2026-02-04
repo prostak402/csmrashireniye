@@ -274,9 +274,24 @@
     };
   }
 
+  function getPrimaryItemAlt(card){
+    const preferredImg = card.querySelector('.csm_a4643089 img[alt], .csm_22b8286f img[alt]');
+    const directAlt = preferredImg?.getAttribute('alt')?.trim();
+    if (directAlt) return directAlt;
+
+    const candidates = Array.from(card.querySelectorAll('img[alt]'));
+    const fallback = candidates.find((img) => {
+      const alt = (img.getAttribute('alt') || '').trim();
+      if (!alt) return false;
+      const lower = alt.toLowerCase();
+      if (lower === 'sticker' || lower === 'keychain') return false;
+      return true;
+    });
+    return fallback?.getAttribute('alt')?.trim() || null;
+  }
+
   function buildHashName(card){
-    const img = card.querySelector('.csm_22b8286f img[alt]') || card.querySelector('img[alt]');
-    let baseName = img?.getAttribute('alt')?.trim();
+    let baseName = getPrimaryItemAlt(card);
     if (!baseName) return null;
     baseName = stripStickerKeychainTails(baseName);
 
