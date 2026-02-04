@@ -7,12 +7,32 @@
   #status { margin: 8px 0 12px; color: #111827; white-space: pre-wrap; }
   .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
   .pill { padding: 4px 8px; background:#eee; border-radius:8px; }
+  .badge { padding: 3px 8px; border-radius: 999px; font-weight: 600; font-size: 12px; }
+  .badge--ok { background: #dcfce7; color: #166534; }
+  .badge--warn { background: #fef3c7; color: #92400e; }
+  .badge--off { background: #e5e7eb; color: #374151; }
+  .muted { color: #6b7280; font-size: 12px; }
+  .meta { margin-top: 8px; display: grid; gap: 4px; }
+  .error { color: #b91c1c; font-size: 12px; }
   label { display:flex; gap:6px; align-items:center; }
   select, input { padding:4px 6px; }
 </style>
 
 <b>CS.MONEY ↔ MarketCSGO</b>
 <p id="status">Готов.</p>
+
+<div class="row">
+  <span class="pill">Авто-цикл:</span>
+  <span id="autoStatusBadge" class="badge badge--off">—</span>
+  <span id="autoStatusReason" class="muted"></span>
+</div>
+<div class="meta">
+  <div>Кэш прайса: <span id="priceCacheAge">—</span></div>
+  <div>Последнее обновление: <span id="priceLastUpdated">—</span></div>
+  <div>Позиций: <span id="priceItemCount">—</span></div>
+  <div>Следующее автообновление: <span id="priceNextRefresh">—</span></div>
+  <div id="lastFetchError" class="error"></div>
+</div>
 
 <div class="row">
   <button id="force">Обновить прайс</button>
@@ -25,6 +45,7 @@
 <div class="row">
   <label><input type="checkbox" id="autoEnabled"> Авто-режим</label>
   <label><input type="checkbox" id="autoActionsEnabled"> Автодействия</label>
+  <label><input type="checkbox" id="autoBuyEnabled"> Автопокупка</label>
   <select id="autoMode">
     <option value="active">Активный</option>
     <option value="passive">Пассивный</option>
@@ -37,6 +58,8 @@
   <input id="autoScanLimit" type="number" min="1" step="1" style="width:70px">
   <span class="pill">ROI ≥ (%)</span>
   <input id="autoRoiThresholdPct" type="number" step="0.1" style="width:70px">
+  <span class="pill">ROI buy ≥ (%)</span>
+  <input id="autoBuyRoiThresholdPct" type="number" step="1" style="width:70px">
 </div>
 <div class="row">
   <span class="pill">Рандом мин (мс):</span>

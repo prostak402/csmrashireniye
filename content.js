@@ -68,6 +68,26 @@
     return Math.min(ROI_THRESHOLD_MAX, Math.max(ROI_THRESHOLD_MIN, n));
   }
 
+  function setAutoStatus(status, reason = ''){
+    try {
+      chrome.storage.local.set({
+        autoStatus: status,
+        autoHaltReason: reason,
+        autoStatusUpdatedAt: Date.now()
+      });
+    } catch (_) {}
+  }
+
+  function syncAutoStatus(){
+    if (auto.autoEnabled && autoHalted) {
+      setAutoStatus('halted', 'roi-threshold');
+    } else if (auto.autoEnabled) {
+      setAutoStatus('running', '');
+    } else {
+      setAutoStatus('disabled', 'manual');
+    }
+  }
+
   function randBetween(min, max){
     const a = Math.max(0, Number(min)||0);
     const b = Math.max(a, Number(max)||a);
@@ -160,6 +180,7 @@
   function ensureAutoRunning({ immediateScan = false } = {}){
     autoHalted = false;
     AUTO.start();
+    syncAutoStatus();
     if (immediateScan) scanAndCompare(true);
   }
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -175,9 +196,11 @@
           ensureAutoRunning({ immediateScan: true });
         } else if (nextEnabled && !autoHalted) {
           AUTO.start();
+          syncAutoStatus();
         } else {
           if (!nextEnabled) autoHalted = false;
           AUTO.stop();
+          syncAutoStatus();
         }
       });
     }
@@ -188,6 +211,7 @@
     if (autoHalted) return;
     autoHalted = true;
     AUTO.stop();
+    setAutoStatus('halted', 'roi-threshold');
     toast('Автообновление остановлено');
     try { chrome.runtime.sendMessage({ type:'FOCUS_ME' }, ()=>{}); } catch(_){}
   }
@@ -620,6 +644,7 @@
       chrome.storage.sync.set({ autoEnabled:false }, () => {
         auto.autoEnabled = false;
         lastKnownAutoEnabled = false;
+        setAutoStatus('disabled', 'hotkey');
         toast('Автоматический режим: выключен');
       });
     } else {
@@ -627,6 +652,7 @@
         auto.autoEnabled = true;
         lastKnownAutoEnabled = true;
         ensureAutoRunning({ immediateScan: true });
+        setAutoStatus('running', '');
         toast('Автоматический режим: включен');
       });
     }
@@ -654,7 +680,12 @@
   });
 
   loadAutoSettings((prevEnabled, nextEnabled) => {
-    if (nextEnabled && !autoHalted) AUTO.start();
+    if (nextEnabled && !autoHalted) {
+      AUTO.start();
+      syncAutoStatus();
+    } else {
+      syncAutoStatus();
+    }
   });
   scanAndCompare();
 
