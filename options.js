@@ -42,10 +42,7 @@ const DEFAULTS = {
   autoBuyEnabled: true,         // НОВОЕ: отдельно включать/выключать автопокупку
   autoBuyRoiThresholdPct: 500,  // НОВОЕ: порог автопокупки
   autoRandomMinMs: 120,
-  autoRandomMaxMs: 420,
-
-  // Переопределения по лотам для истории продаж
-  lotHistoryOverrides: []
+  autoRandomMaxMs: 420
 };
 
 // Отрисовка «умной» секции
@@ -106,34 +103,6 @@ function collectPayload() {
     }
   }
 
-
-  if (exists('lotOverridesBody')) {
-    const rows = Array.from(document.querySelectorAll('#lotOverridesBody tr'));
-    const overrides = [];
-    for (const row of rows) {
-      const csmName = row.querySelector('[data-field="csmName"]')?.value?.trim() || '';
-      const historyName = row.querySelector('[data-field="historyName"]')?.value?.trim() || '';
-      const buyFeePctRaw = row.querySelector('[data-field="buyFeePct"]')?.value ?? '';
-      const sellFeePctRaw = row.querySelector('[data-field="sellFeePct"]')?.value ?? '';
-      const withdrawFeePctRaw = row.querySelector('[data-field="withdrawFeePct"]')?.value ?? '';
-      if (!csmName && !historyName) continue;
-      const toShare = (raw) => {
-        if (raw === '' || raw == null) return null;
-        const val = Number(raw);
-        if (!Number.isFinite(val)) return null;
-        return Math.max(0, val) / 100;
-      };
-      overrides.push({
-        csmName,
-        historyName,
-        buyFeeCsm: toShare(buyFeePctRaw),
-        sellFeeMarket: toShare(sellFeePctRaw),
-        withdrawFeeMarket: toShare(withdrawFeePctRaw)
-      });
-    }
-    p.lotHistoryOverrides = overrides;
-  }
-
   return p;
 }
 
@@ -147,39 +116,6 @@ function status(msg, ok = true) {
   el.style.opacity = '1';
   clearTimeout(statusTimer);
   statusTimer = setTimeout(() => { el.style.opacity = '0'; }, 1500);
-}
-
-function createOverrideRow(override = {}) {
-  if (!exists('lotOverridesBody')) return;
-  const tr = document.createElement('tr');
-  const toPct = (v) => (Number.isFinite(Number(v)) ? (Number(v) * 100) : '');
-  tr.innerHTML = `
-    <td><input class="lot-input" data-field="csmName" placeholder="Например, AK-47 | Redline (FT)" value="${override.csmName || ''}"></td>
-    <td><input class="lot-input" data-field="historyName" placeholder="Если в истории другое имя" value="${override.historyName || ''}"></td>
-    <td><input class="pct-input" type="number" step="0.1" min="0" data-field="buyFeePct" value="${toPct(override.buyFeeCsm)}"></td>
-    <td><input class="pct-input" type="number" step="0.1" min="0" data-field="sellFeePct" value="${toPct(override.sellFeeMarket)}"></td>
-    <td><input class="pct-input" type="number" step="0.1" min="0" data-field="withdrawFeePct" value="${toPct(override.withdrawFeeMarket)}"></td>
-    <td><button type="button" class="danger" data-action="remove-override">Удалить</button></td>
-  `;
-  tr.querySelectorAll('input').forEach((input) => {
-    input.addEventListener('input', debouncedSave);
-    input.addEventListener('change', save);
-  });
-  tr.querySelector('[data-action="remove-override"]').addEventListener('click', () => {
-    tr.remove();
-    save();
-  });
-  $('lotOverridesBody').appendChild(tr);
-}
-
-function renderOverrides(overrides = []) {
-  if (!exists('lotOverridesBody')) return;
-  $('lotOverridesBody').innerHTML = '';
-  if (!Array.isArray(overrides) || !overrides.length) {
-    createOverrideRow({});
-    return;
-  }
-  overrides.forEach(o => createOverrideRow(o));
 }
 
 // Загрузка значений в форму
@@ -213,7 +149,6 @@ function load() {
     setIf('autoBuyRoiThresholdPct', s.autoBuyRoiThresholdPct);
     setIf('autoRandomMinMs', s.autoRandomMinMs);
     setIf('autoRandomMaxMs', s.autoRandomMaxMs);
-    renderOverrides(s.lotHistoryOverrides);
 
     updateSmartBoxVisibility();
   });
@@ -265,8 +200,6 @@ function bind() {
     $(id).addEventListener('input', debouncedSave);
     $(id).addEventListener('change', save);
   });
-
-  if (exists('addLotOverride')) $('addLotOverride').addEventListener('click', () => createOverrideRow({}));
 
   // Кнопка «Сохранить» (если есть)
   if (exists('save')) $('save').addEventListener('click', save);
