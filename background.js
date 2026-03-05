@@ -24,8 +24,7 @@ const DEFAULTS = {
   autoBuyEnabled: true,
   autoBuyRoiThresholdPct: 500,
   autoRandomMinMs: 120,
-  autoRandomMaxMs: 420,
-  lotHistoryOverrides: []
+  autoRandomMaxMs: 420
 };
 
 function asNum(v){ const x = Number(v); return Number.isFinite(x) ? x : 0; }
@@ -48,7 +47,6 @@ async function getSettings() {
     let b = asNum(s.roiBlueMinPct)/100;
     if (p < g) p = g; if (b < p) b = p;
     s._greenMin=g; s._purpleMin=p; s._blueMin=b;
-    s._overrideMaps = buildOverrideMaps(s.lotHistoryOverrides);
 
     res(s);
   }));
@@ -59,34 +57,6 @@ function normName(s){
   let r = s.replace(/\u2122/g, '™').replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
   r = r.replace(/^StatTrak™\s+/, 'StatTrak™ ').replace(/^Souvenir\s+/, 'Souvenir ');
   return r;
-}
-
-
-
-function buildOverrideMaps(list){
-  const byCsmName = {};
-  if (!Array.isArray(list)) return { byCsmName };
-  for (const raw of list){
-    const csmName = normName(raw?.csmName || '');
-    if (!csmName) continue;
-    byCsmName[csmName] = {
-      historyName: normName(raw?.historyName || ''),
-      buyFeeCsm: Number.isFinite(Number(raw?.buyFeeCsm)) ? Math.max(0, Number(raw.buyFeeCsm)) : null,
-      sellFeeMarket: Number.isFinite(Number(raw?.sellFeeMarket)) ? Math.max(0, Number(raw.sellFeeMarket)) : null,
-      withdrawFeeMarket: Number.isFinite(Number(raw?.withdrawFeeMarket)) ? Math.max(0, Number(raw.withdrawFeeMarket)) : null
-    };
-  }
-  return { byCsmName };
-}
-
-function resolveItemSettings(itemName, s){
-  const override = s._overrideMaps?.byCsmName?.[normName(itemName)] || null;
-  return {
-    buyFeeCsm: override?.buyFeeCsm ?? s.buyFeeCsm,
-    sellFeeMarket: override?.sellFeeMarket ?? s.sellFeeMarket,
-    withdrawFeeMarket: override?.withdrawFeeMarket ?? s.withdrawFeeMarket,
-    historyName: override?.historyName || normName(itemName)
-  };
 }
 
 let priceCache = { time: 0, currency: "RUB", mapByName: {} };
@@ -320,9 +290,9 @@ function buildSmartPriceFromHistory(prices, s){
   return sale > 0 ? sale : null;
 }
 
-async function estimateSmartPrice(itemName, entry, s, itemCfg){
+async function estimateSmartPrice(itemName, entry, s){
   const index = await loadHistoryIndex();
-  const id = index[itemCfg.historyName] ?? null;
+  const id = index[normName(itemName)] ?? null;
   if (id){
     const hist = await loadItemHistory(id);
     const prices = pickRecentSales(hist);
@@ -362,10 +332,10 @@ function estimateSalePrice(entry, s, overrideMode){
   else if (bid>0) est = bid*up;
   return { value: est, source: 'smart_fallback' };
 }
-function calcWithBase(csmPriceRub, marketBase, feeCfg){
+function calcWithBase(csmPriceRub, marketBase, s){
   if (!(marketBase>0)) return null;
-  const Cin  = csmPriceRub * (1 + feeCfg.buyFeeCsm);
-  const Pout = marketBase   * (1 - feeCfg.sellFeeMarket) * (1 - feeCfg.withdrawFeeMarket);
+  const Cin  = csmPriceRub * (1 + s.buyFeeCsm);
+  const Pout = marketBase   * (1 - s.sellFeeMarket) * (1 - s.withdrawFeeMarket);
   const delta = Pout - Cin;
   const roi = delta / Cin;
   return { marketBase, Cin, Pout, delta, roi };
@@ -378,12 +348,11 @@ async function handleBatchCompare(items){
   const mode = (s.priceMode||'best_offer').toLowerCase();
   for (const item of items){
     const name = normName(item.hashName);
-    const itemCfg = resolveItemSettings(name, s);
     const entry = cache.mapByName[name];
     const est = (mode === 'smart')
-      ? await estimateSmartPrice(name, entry, s, itemCfg)
+      ? await estimateSmartPrice(name, entry, s)
       : estimateSalePrice(entry, s, mode);
-    const res = calcWithBase(item.csmPriceRub, Number(est.value), itemCfg);
+    const res = calcWithBase(item.csmPriceRub, Number(est.value), s);
     out[item.cardId] = res ? {
       ok: res.roi >= s.roiMin,
       roi: res.roi,
