@@ -12,6 +12,13 @@
   legend { padding:0 6px; color:#111827; }
   .row { display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
   .inline { display:flex; gap:12px; align-items:center; }
+  table { width:100%; border-collapse: collapse; }
+  th, td { border-bottom:1px solid #e5e7eb; padding:6px; text-align:left; vertical-align:top; }
+  th { font-size:12px; color:#374151; }
+  .lot-input { width:100%; box-sizing:border-box; }
+  .pct-input { width:90px; }
+  .danger { background:#b91c1c; }
+  #status { margin-left:12px; color:#10b981; opacity:0; transition:opacity .2s; }
 </style>
 <h1>Настройки</h1>
 
@@ -119,6 +126,28 @@
   </div>
 </fieldset>
 
+<fieldset>
+  <legend>История продаж — ручные переопределения</legend>
+  <small>Можно задать другое имя лота для поиска в истории, а также персональные комиссии в % (пусто = общие настройки).</small>
+  <table>
+    <thead>
+      <tr>
+        <th>Название лота на CS.MONEY</th>
+        <th>Название в истории продаж</th>
+        <th>Покупка %</th>
+        <th>Продажа %</th>
+        <th>Вывод %</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="lotOverridesBody"></tbody>
+  </table>
+  <div style="margin-top:8px;">
+    <button type="button" id="addLotOverride">Добавить строку</button>
+  </div>
+</fieldset>
+
 <button id="save">Сохранить</button>
+<span id="status"></span>
 
 <script src="options.js"></script>
